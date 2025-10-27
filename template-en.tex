@@ -1,185 +1,166 @@
 %!TEX program = pdflatex
+\PassOptionsToPackage{style=ieee, backend=biber}{biblatex}
 \documentclass[11pt,en]{elegantpaper}
 
-\title{Template for the Survey Paper}
-\author{Anonymous}
-\institute{Anonymous}
+\title{A Survey of Congestion Control for RDMA in Data Centers}
+\author{Sinuo Cao}
+\institute{School of Computer Science, Peking University}
 
 % cmd for this doc
 \usepackage{array}
+\addbibresource{reference.bib}
 \newcommand{\ccr}[1]{\makecell{{\color{#1}\rule{1cm}{1cm}}}}
+\newcommand{\todo}[1]{{\color{red}TODO: #1}}
 
 \begin{document}
 
 \maketitle
 
 \begin{abstract}
-This article is an explanatory document for the template of a review paper on scientific research methods and practical courses. This template is based on the article class of LATEX. If you have any questions, please contact the course assistant\footnote[1]{wang\_xiaodong@stu.pku.edu.cn\\2401111937@stu.pku.edu.cn\\ yuxueqing@pku.edu.cn} or provide feedback in the course group.
+The proliferation of high-performance computing and large-scale AI training in data centers has made low-latency, high-throughput networking a critical requirement. Remote Direct Memory Access (RDMA) technology is pivotal to meeting this demand. However, achieving efficient congestion control in RDMA networks, particularly within lossless fabrics, remains a significant challenge. This survey provides a systematic review and taxonomy of state-of-the-art RDMA congestion control schemes, categorizing them based on their primary congestion signals, such as Explicit Congestion Notification (ECN), network delay and In-band Network Telemetry (INT). We dissect the core mechanisms, advantages, and limitations of key algorithms including DCQCN, TIMELY, Swift, HPCC, Poseidon, ACC, QCN and RoCC. A comparative analysis reveals fundamental trade-offs between performance, overhead, and deployability, and highlights an evolutionary trend towards greater signal precision and network-assisted control. Furthermore, the discussion outlines future research directions, such as co-design with AI workloads and integration with other network control planes. This survey serves as a structured guide for understanding the current landscape and future evolution of congestion control in RDMA-based data center networks.
 
-\keywords{\LaTeX{}, Survey Paper, Template}
+\keywords{RDMA, Congestion Control, Data Center Networks, Survey}
 \end{abstract}
 
 
-\section{Course Requirements}
+\section{Introduction}
+\label{sec:intro}
 
-The Scientific Research Methods and Practice course aims to cultivate students' independent research and academic writing abilities. Each student is required to complete a paper survey. The specific requirements are as follows.
+Data center applications require extremely high throughput and ultra-low latency. Remote Direct Memory Access (RDMA) meets this demand by enabling direct memory-to-memory data transfer, bypassing the operating system kernel and CPU. This kernel bypass, combined with a zero-copy design, provides the ultra-low latency and high throughput essential for modern cloud services.
 
-\subsection{Content Requirements}
-\begin{itemize}
-    \item The paper needs to introduce at least 5 papers in relevant research fields.
-    \item The paper should have a clear structure, including abstract, introduction, review, discussion, and conclusion.
-    \item The paper should include a figure or table comparing the similarities and differences of existing work, accompanied by appropriate explanatory text.
-    \item The word count range of the paper should be between 1500 and 2500 words, excluding references.
-    \item The paper can be written in Chinese or English, but it is necessary to ensure accurate and clear language expression.
-\end{itemize}
+In cloud network environments with numerous coexisting network flows, properly reacting to network congestion is crucial. Network congestion occurs when the demand for link bandwidth exceeds the available capacity. Congestion leads to increased queueing delays and packet losses, which can significantly degrade network performance. The key goals of congestion control include achieving low latency, high bandwidth utilization, low Flow Completion Time (FCT), and fairness among concurrent flows.
 
-\subsection{Submission Deadline}
-The paper needs to be submitted before \textbf{October 28th}. Late submissions will not be accepted. Please make sure to schedule the completion of the paper in advance and ensure timely submission.
+Congestion control for RDMA is uniquely challenging. RDMA often operates in lossless networks managed by mechanisms like Priority Flow Control (PFC)~\cite{pfc-qbb}, which prevent packet loss at link-layer levels but can introduce other problems like head-of-line blocking. Furthermore, traditional TCP-based congestion control (e.g., DCTCP~\cite{dctcp}), which uses packet loss as a signal and utilizes slow start mechanisms, is too slow and inefficient for for the micro-second scale dynamics of RDMA networks and does not take into account the specific characteristics of RDMA specifications.
 
-\subsection{Submission Platform}
-The paper should be submitted through the HotCRP platform. Please click on the following link to enter the submission page: \href{https://pku-cs25sci.hotcrp.com/}{https://pku-cs25sci.hotcrp.com}。
- 
-\subsection{Peer review rules}
-Each paper will be reviewed by three classmates, and the review process will follow the following principles:
+% DCQCN: ECN, TIMELY & Swift: delay, HPCC & Poseidon: INT, RoCC & QCN: Switch-driven, ACC: ACK driven
+This survey systematically reviews and categorizes key algorithms designed for RDMA congestion control. We focus on representative schemes that highlight different approaches: DCQCN~\cite{dcqcn} using Explicit Congestion Notification (ECN)~\cite{ecn} as the industry baseline; TIMELY~\cite{timely} and Swift~\cite{swift} using delay-based signals; HPCC~\cite{hpcc} and Poseidon~\cite{poseidon} leveraging precise In-band Network Telemetry (INT)~\cite{int}; RoCC~\cite{rocc} and QCN~\cite{qcn} using switch-driven mechanisms; and ACC~\cite{acc} employing ACK-driven feedback.
 
-\textbf{Reviewer selection}: Three peer reviewers will be assigned to each paper. The selection of reviewers will remain anonymous.
+The rest of this survey is structured as follows. Section~\ref{sec:review} provides a detailed review of the selected works. Section~\ref{sec:discussion} discusses their comparative trade-offs and future directions. Section~\ref{sec:conclusion} concludes the survey.
 
-\textbf{Review Criteria}: Reviewers are required to evaluate the paper based on the following criteria:
-\begin{itemize}
-    \item The structure and organization of the paper.
-    \item The accuracy and comprehensiveness of the paper's synthesis of relevant literature.
-    \item The accuracy and fluency of the language expression in the paper.
-    \item The depth and breadth of the paper.
-    \item The insight and value of the discussion and conclusion of the paper.
-\end{itemize}
 
-\textbf{Submit review comments}: Reviewers are required to submit review comments within the designated time frame, including ratings and suggestions for the paper. The evaluation opinions will have an impact on the final grade of the paper.
+\section{Review}
+\label{sec:review}
 
-\textbf{Attention}: To provide a fair and transparent review process, students should complete their papers within the prescribed time and adhere to the principle of integrity, and should not plagiarize or plagiarize others' works. If you have any questions or need further guidance, please feel free to contact the course teacher or teaching assistant at any time.
+At its core, a congestion control scheme is a distributed feedback mechanism where the sender of each
+network flow dynamically adjusts its transmission rate based on received congestion signals. In this context,
+a flow is typically defined as a sequence of packets sharing the same five-tuple (source and destination IP,
+source and destination port, and protocol). In RDMA networks, congestion signals can take various forms: explicit notifications from the network (e.g., ECN~\cite{ecn} marks), implicit indicators derived from network state (e.g., RTT or queueing delay), direct telemetry data from switches (e.g., INT~\cite{int}), or end-host observations (e.g., ACK arrival patterns). The following sections categorize and review key RDMA congestion control schemes based on the primary type of congestion signal they employ, highlighting their mechanisms, advantages, and limitations.
 
-\section{Template Usage Instructions}
+\subsection{ECN-based Congestion Control}
+\label{sec:ecn-based}
 
-This template is based on the standard \LaTeX{} article class, hence the arguments of article class are acceptable. The page setting of this template is \lstinline {a4paper}, and the font size of the main text is \lstinline {11pt}. Please do not modify it.
+Explicit Congestion Notification (ECN)~\cite{ecn} is a mechanism where network devices explicitly mark packets with a congestion indicator instead of dropping them when congestion is detected. This provides a direct and timely signal for end-hosts to throttle their transmission rates before congestion becomes severe.
 
-\begin{lstlisting}
-\documentclass[a4paper,11pt]{elegantpaper}
-\end{lstlisting}
+% DCQCN: Switch: use RED queue and mark ECN; Receiver host: echo ECN marks in ACKs; Sender host: adjust rate based on ECN marks in ACKs
+Data Center Quantized Congestion Notification (DCQCN)~\cite{dcqcn} is a widely adopted ECN-based congestion control scheme specifically designed for RDMA networks. DCQCN operates by monitoring ECN marks on incoming packets and adjusting the sender's rate accordingly. In DCQCN, switches implement Random Early Detection (RED)~\cite{red} queues that mark packets with ECN when the buffer queue length exceeds a certain threshold. The receiver host echoes these ECN marks back to the sender in ACK packets. Upon receiving ACKs with ECN marks, the sender reduces its transmission rate using a quantized backoff mechanism, which allows for rapid response to congestion while maintaining high throughput.
 
-\subsection{Use of Chinese and English templates}
+DCQCN is the industry standard for RDMA congestion control, widely adopted due to its simplicity and compatibility with existing ECN-enabled infrastructure. It requires minimal modifications to the network and end-hosts, making it easy to deploy. However, DCQCN has notable limitations. Its reliance on end-to-end feedback introduces latency in congestion reaction, which can lead to persistent queue buildup and increased delays. Additionally, the algorithm's performance is highly sensitive to the configuration of ECN marking thresholds and other parameters, making it challenging to optimize for diverse workloads and network conditions.
 
-\begin{itemize}
-    \item For Chinese, please use \lstinline{template-cn.tex} as template, and use \hologo{XeLaTeX} for compile.
-    \item For English, please use \lstinline{template-en.tex}as template, and use \hologo{pdfLaTeX} or \hologo{XeLaTeX} for compile.
-\end{itemize}
+\subsection{Delay-based Congestion Control}
+\label{sec:delay-based}
 
-Language mode option \lstinline{lang} allows two alternative inputs, \lstinline{lang=en} (default)  for English or \lstinline{lang=cn} for Chinese. \lstinline{lang=cn} will make the caption of figure/table, abstract name, refname etc. Chinese. You can use this option as
-\begin{lstlisting}
-\documentclass[lang=cn]{elegantpaper} % or
-\documentclass{cn}{elegantpaper} 
-\end{lstlisting}
-\textbf{Note:} Under the English mode \lstinline{lang=en}, Chinese characters are not allowed. To type in Chinese, please load  \lstinline{ctex} or \lstinline{xeCJK} package at the preamble as:
-\begin{lstlisting}
-\usepackage[UTF8,scheme=plain]{ctex}
-\end{lstlisting}
+Network delay, specifically Round-Trip Time (RTT) and queueing delay, serves as a direct and implicit signal of network congestion. An increase in RTT or the onset of persistent queueing delay suggests that packets are experiencing delays in the transmission procedure, indicating the presence of network congestion and prompting congestion control schemes to reduce the transmission rate.
 
-\subsection{Figures and Tables}
+TIMELY~\cite{timely} is a pioneering delay-based algorithm that utilizes fine-grained RTT measurements to detect congestion. RTT refers to the time it takes for a packet to travel from the sender to the receiver and back again. By continuously monitoring the RTT gradient (the rate of change of RTT), TIMELY can proactively reduce the sending rate upon detecting an increasing RTT trend, effectively controlling queue buildup before it leads to ECN marking or loss. This RTT-based approach allows TIMELY to achieve low latency, particularly in environments where ECN signals may be delayed. However, its performance can be sensitive to the precise tuning of RTT thresholds and may be affected by noise in RTT measurements.
 
-\subsubsection{Figures}
-Here is a code example for inserting an image.
-\begin{lstlisting}
-\begin{figure}[!htb]
-    \centering
-    \includegraphics[width=0.9\textwidth]{image/pku.png}
-    \caption{Figure Example} 
-    \label{fig1}
-\end{figure}
-\end{lstlisting}
+Swift~\cite{swift} presents a simplified yet highly effective delay-based approach. It relies solely on the measured queueing delay as its congestion signal. The core principle of Swift is to maintain a very small, fixed target queue delay. Upon detecting that the current queueing delay exceeds this target, Swift multiplicatively decreases the sending rate; otherwise, it additively increases the rate. This simple mechanism enables Swift to achieve extremely fast convergence and maintain minimal queues, resulting in exceptionally low flow completion times. Its simplicity makes it robust and easier to parameterize compared to more complex algorithms like TIMELY.
 
-\begin{figure}[!htb]
-    \centering
-    \includegraphics[width=0.9\textwidth]{image/pku.png}
-    \caption{Figure Example}
-    \label{fig1}
-\end{figure}
-As shown in \figref{fig1}, this is a picture of Peking University. When referencing images, please use the code: \verb|\figref{fig1}|.
+\subsection{INT-based Congestion Control}
+\label{sec:int-based}
 
-\subsubsection{Tables}
-Here is a code example for inserting a table.
-\begin{lstlisting}
+In-band Network Telemetry (INT)~\cite{int} is a framework that allows switches to embed fine-grained state information, such as queue occupancy and link utilization, directly into the data packets as they traverse the network. This enables end-hosts to receive precise, real-time snapshots of the network's internal state, overcoming the indirect and aggregated nature of signals like ECN or delay.
+
+% INT used in HPCC: TS (timestamp), txBytes (accumulate total bytes sent from the egress port), qLen (the current queue length of the egress port)
+HPCC (High Precision Congestion Control)~\cite{hpcc} leverages INT to achieve high utilization and near-zero queueing simultaneously. In HPCC, network switches embed telemetry information, including timestamps (TS), total bytes sent from the egress port (txBytes), and the current queue length of the egress port (qLen), directly into the data packets. Senders receive the above information from the network and directly calculate the precise sending rate that would fully utilize the bottleneck link without building up queues. This direct measurement enables HPCC to react to congestion with extremely high speed and accuracy, achieving high throughput and very low latency. However, its heavy reliance on INT data incurs higher switch overhead and bandwidth cost for the telemetry data, posing challenges for widespread deployment.
+
+Poseidon~\cite{poseidon} leverages INT to achieve efficient, robust, and practical datacenter congestion control. It introduces a novel design where switches embed only the maximum per-hop queuing delay into packets, which is then used by senders to adjust their rates based on a dynamic, rate-adjusted target delay. By reacting only to congestion at the bottleneck hop (rather than every congested hop), Poseidon ensures network-wide max-min fairness, fast convergence, and stable throughput. It also supports incremental deployment in brownfield environments and requires minimal INT overhead, making it both practical and deployable at scale. However, its fundamental reliance on INT, albeit minimal, still necessitates hardware support and changes in the network fabric, which could be a barrier to adoption in non-programmable switch environments.
+
+\subsection{ACK-based Congestion Control}
+\label{sec:ack-based}
+
+The intrinsic packet conservation property of lossless networks, where no packets are dropped due to the PFC mechanism, provides a unique opportunity for congestion control for RDMA networks. This property guarantees that every data packet injected into the network will eventually be acknowledged, making the ACK stream a precise reflection of network deliveries.
+
+ACC (ACK-driven Congestion Control)~\cite{acc} leverages this property to achieve fast convergence and precise rate adjustment. In ACC, senders meticulously analyze the time series of returning ACKs to infer two key pieces of information: the number of excessive packets backlogged in switch queues and the available bandwidth of the network pipe. Upon detecting congestion (e.g., via explicit signals like TCD~\cite{tcd}), a sender enters a \textit{source halt} state, pausing transmission for a calculated duration to allow the network to drain these excessive packets. After the halt, the sender sets its transmission rate based on the ACK arrival rate, which accurately reflects the fair share of the bottleneck bandwidth. This approach enables ACC to rapidly eliminate standing queues and converge to the fair rate within one RTT, effectively mitigating issues like HoL blocking and PFC-induced deadlocks. Since ACC relies solely on ACK information already available at the host, it requires no switch support for complex in-band telemetry or rate calculation, making it highly practical for deployment on existing hardware. However, its effectiveness is inherently tied to the accuracy and timeliness of the ACK stream, making its performance susceptible to issues in the reverse path, such as ACK compression or loss.
+
+\subsection{Switch-driven Congestion Control}
+\label{sec:switch-driven}
+
+Switch-driven congestion control represents a paradigm shift from traditional end-host-based algorithms by placing the intelligence for rate calculation directly within the network switches. This approach allows for global, per-port decisions to be made based on precise and instantaneous queue occupancy, which can then be communicated to the end-hosts, thereby enabling faster and more stable reaction to congestion.
+
+QCN (Quantized Congestion Notification)~\cite{qcn}, standardized as part of IEEE 802.1Qau, is a foundational switch-driven scheme designed for lossless Ethernet. In QCN, a switch continuously monitors its egress queue length and computes a quantized feedback value (\(F_b\)) that represents the degree of congestion deviation from a desired operating point. This \(F_b\) value is then encapsulated in a \textit{feedback message} and sent directly to the source responsible for the congestion. Upon receipt, the source executes a control law to adjust its sending rate based on this explicit feedback. While effective, QCN's convergence can be slow, and its stability has been a subject of study, leading to proposals for enhancements.
+
+RoCC (Robust Congestion Control)~\cite{rocc} is a more recent switch-driven scheme designed for RDMA networks. It employs a Proportional-Integral (PI) controller at the switch, which uses the current and previous egress queue sizes to calculate a \textit{fair rate} for all competing flows. This computed rate is then signaled directly to the relevant sources via dedicated ICMP-based Congestion Notification Packets (CNPs)~\cite{qcn}. A key innovation of RoCC is its self-tuning mechanism for the PI controller parameters, which ensures system stability and rapid convergence across a wide range of network conditions. By having the switch dictate the exact sending rate, RoCC achieves robust performance, significantly reduces PFC activation, and handles multiple bottlenecks effectively. However, its reliance on switch-based computation and the need for a feedback messaging mechanism require support from programmable or custom-designed switch ASICs for practical implementation.
+
+
+\section{Discussion}
+\label{sec:discussion}
+
 \begin{table}[!htb]
     \centering
-    \caption{Table Example}
-    \begin{tabular}{l|c|c|c}
+    \caption{Comparison of RDMA Congestion Control Schemes}
+    \begin{tabular}{l|l|l|l}
         \toprule
-        \textbf{Methods} & \textbf{Metric1}  &  \textbf{Metric2} &  \textbf{Metric3}\\
-        \hline 
-        Method1~\cite{en1}& XX & XX& XX\\
+        \textbf{Scheme (Year)} & \textbf{Driven By} & \textbf{Congestion Signal} & \textbf{Key Properties} \\
+        \midrule
+        DCQCN~\cite{dcqcn} (2015) & Host & ECN (Queue Threshold) & De facto standard, configuration-sensitive \\
         \hline
-        Method2~\cite{en2}& XX & XX& XX\\
+        TIMELY~\cite{timely} (2015) & Host & RTT Gradient & Proactive, low latency, noise-sensitive \\
         \hline
-        Method3~\cite{en3}& XX & XX& XX\\
+        Swift~\cite{swift} (2020) & Host & Queue Delay & Simple, fast convergence, noise-sensitive \\
+        \hline
+        HPCC~\cite{hpcc} (2019) & Host & INT (Link Load \& Queue) & High precision, near-zero queue, high overhead \\
+        \hline
+        Poseidon~\cite{poseidon} (2023) & Host & INT (Max Hop Delay) & Bottleneck-focused, practical INT design \\
+        \hline
+        ACC~\cite{acc} (2024) & Host & ACK Arrival Pattern & Fast convergence, requires lossless fabric \\
+        \hline
+        QCN~\cite{qcn} (2010) & Switch & Queue Length & Early standard, switch-driven, slow convergence \\
+        \hline
+        RoCC~\cite{rocc} (2020) & Switch & Queue Dynamics & Robust, self-tuning, suppresses PFC effectively \\
         \bottomrule 
     \end{tabular}
-    \label{tab1}
+    \label{tab:scheme_comparison}
 \end{table}
-\end{lstlisting}
+The comprehensive review in Section~\ref{sec:review} has systematically categorized and detailed a spectrum of congestion control schemes designed for RDMA networks. This analysis reveals a diverse design space where schemes make fundamentally different choices regarding the source of congestion signals and the location of rate control decisions. To facilitate a high-level comparison, the key characteristics of these schemes are summarized in \tabref{tab:scheme_comparison}. This taxonomy, organized primarily by the nature of the congestion signal and whether the flow rate computation is driven by hosts or switches, provides a foundational framework for the following discussion. We now delve deeper into the insights drawn from this classification, analyze the inherent trade-offs, and explore the remaining challenges and future directions.
 
-As shown in \tabref{tab1}, this is a statistical table. When referencing tables, please use the code: \verb|\tabref{tab1}|.
-\begin{table}[!htb]
-    \centering
-    \caption{Table Example}
-    \begin{tabular}{l|c|c|c}
-        \toprule
-        \textbf{Methods} & \textbf{Metric1}  &  \textbf{Metric2} &  \textbf{Metric3}\\
-        \hline 
-        Method1~\cite{en1}& XX & XX& XX\\
-        \hline
-        Method2~\cite{en2}& XX & XX& XX\\
-        \hline
-        Method3~\cite{en3}& XX & XX& XX\\
-        \bottomrule 
-    \end{tabular}
-    \label{tab1}
-\end{table}
+\subsection{Insights from Taxonomy and Evolution}
+\label{subsec:insights}
 
+The taxonomy of existing schemes reveals a clear evolution in RDMA congestion control, moving from reliance on proxy signals and host-based inference towards acquiring direct network state and embracing switch-assisted decision-making.
 
-\subsection{Bibliography}
+Early solutions, such as the ECN-based DCQCN and the delay-based TIMELY and Swift, primarily depend on \textit{indirect, proxy signals} to infer network congestion. ECN marks indicate that a queue threshold was crossed, while increases in RTT or queueing delay suggest that packets are being buffered. Although these signals are valuable, they are inherently imprecise estimations of the true network state. ECN reacts to queue length but not directly to link utilization, and delay measurements can be noisy. This often leads to a trade-off between reaction speed and control accuracy. The subsequent emergence of In-band Network Telemetry (INT) schemes, like HPCC and Poseidon, represents a significant shift towards \textit{direct and precise visibility} into the network's internal state. By reading actual switch queue occupancy and link utilization from data packets, senders can make highly accurate rate decisions, aiming to achieve both high utilization and minimal queues. Similarly, switch-driven schemes like RoCC move the intelligence into the network, where switches can use their holistic view of per-port congestion to compute and enforce fair rates directly. Even ACK-based ACC leverages a direct consequence of network conservation in lossless fabrics. This evolution, summarized in \tabref{tab:scheme_comparison}, underscores a philosophical shift from performing distributed estimation and reaction at the end-hosts, to either making the network state explicitly visible to the hosts or having the network itself take direct control.
 
-This template uses biblatex to generate the bibliography, the default citestyle and bibliography style are both \lstinline{numeric}. If you want to use biblatex, you must create a file named \lstinline{reference.bib}, add bib items (from Google Scholar, Mendeley, EndNote, and etc.) to \lstinline{reference.bib} file, then cite the bibkey in the \lstinline{tex} file. The biber will automatically generate the bibliography for the reference you cited. Here is a code example for reference: \verb|\cite{key}|.
+\subsection{Core Trade-offs: Performance, Overhead, and Deployability}
+\label{subsec:trade-offs}
 
-\subsection{Mathematical Formula}
+The landscape of RDMA congestion control algorithms is fundamentally defined by several core trade-offs among performance, operational overhead, and practical deployability, indicating that no single solution is optimal for all scenarios.
 
-The use of mathematical formulas is consistent with regular latex documents. This is an example of formula code.
-\begin{lstlisting}
-\begin{equation}
-  L = \int_{R^q} f(x,y) dy
-\end{equation}
-\end{lstlisting}
+First, a key trade-off exists between \textit{signal simplicity and operational overhead}. Delay-based schemes like Swift rely on queueing delay as a simple and readily available congestion signal, which allows for swift reactions to incipient congestion. However, the delay signal can be noisy and may not always reflect the exact network state. In contrast, INT-based schemes like HPCC achieve extremely high precision by leveraging exact switch state, enabling near-optimal performance. This precision comes at the cost of increased switch processing overhead and additional network bandwidth consumption for telemetry data, which can pose challenges for widespread deployment.
 
-The displayed results are as follows:
-\begin{equation}
-  L = \int_{R^q} f(x,y) dy
-\end{equation}
+Second, we observe a trade-off between \textit{control stability and deployment complexity}. Host-driven schemes, including the industry-standard DCQCN, are attractive due to their simpler deployment requirements on existing hardware. However, their distributed nature can lead to oscillatory behavior as multiple senders react simultaneously to the same network signal. Conversely, switch-driven schemes like RoCC can achieve superior stability and global fairness because a central entity (the switch) makes coordinated decisions for all competing flows. The cost of this stability is a higher deployment barrier, requiring programmable switches capable of performing the necessary computations and generating feedback messages.
+
+Finally, the trade-off between \textit{algorithmic simplicity and environmental adaptability} is evident. Algorithms like Swift, with their minimalistic design focused on a single signal (queue delay), are inherently robust and easy to tune. However, their simplicity might limit their effectiveness in highly complex or heterogeneous network scenarios. More sophisticated algorithms like HPCC or DCQCN are designed to adapt to various network conditions and provide robust performance, but this can introduce sensitivity to parameter tuning and a reliance on specific network features (e.g., INT), making them potentially more complex to manage in practice.
+
+\subsection{Future Research Directions}
+\label{subsec:future-directions}
+
+The evolution of RDMA congestion control is far from complete. As data center applications and technologies continue to advance, new challenges and opportunities emerge. Building upon the discussed schemes and their trade-offs, we outline several promising directions for future research.
+
+\textbf{AI Workload-Aware Design.} Existing works primarily target general-purpose data centers with mixed workloads, necessitating complex trade-offs. The rise of dedicated AI clusters, however, presents a new paradigm. AI training jobs, especially for Large Language Models (LLMs), are characterized by predictable, periodic, and synchronized communication patterns (e.g., All-Reduce). This unique traffic signature opens the door for specialized congestion control strategies that are co-designed with the application. Instead of being general-purpose, future algorithms could leverage this predictability to proactively schedule rates, allocate bandwidth in advance, or dynamically adjust parameters in sync with the computation phases, potentially achieving near-optimal performance for this critical class of workloads.
+
+\textbf{Integration with Other Network Control Knobs.} Congestion control primarily addresses per-flow rate allocation in the bandwidth domain. However, the network control space is multi-dimensional, encompassing packet scheduling (e.g., priorities, deadlines) and routing. These knobs are deeply intertwined; the effectiveness of a rate-based scheme can be enhanced or undermined by the underlying routing strategy or the scheduler at the switch egress port. More research is needed to define the precise role of congestion control within the broader control plane of modern data centers. Promising avenues include the joint optimization of congestion control and priority scheduling to minimize tail latency, or the co-design of in-network load balancing (e.g., via programmable switches) with end-host rate adaptation to create a truly holistic network management system.
+
+\textbf{Leveraging Programmability for Dynamic Control Logic.} The advent of fully programmable data planes (e.g., P4) allows the core logic of congestion control to move from static algorithms to dynamic, deployable programs. This enables a future where the congestion control mechanism itself can be adapted on the fly. For instance, the network could switch between a low-latency mode (using a Swift-like algorithm) during latency-sensitive query phases and a high-throughput mode during bulk data transfer phases, all defined by software. Research in this area would focus on creating a framework for dynamic algorithm selection or fine-tuning, making the network itself a flexible and adaptive resource that can be tailored to the precise needs of the applications it serves.
+
+\textbf{Enhanced Reliability and Robustness.} As RDMA becomes the backbone for large-scale AI training and mission-critical applications, the reliability of congestion control under extreme scenarios becomes paramount. Future research should focus on enhancing robustness against link failures, switch malfunctions, or adversarial traffic patterns. This could involve designing congestion control schemes that can quickly detect and route around failures, or incorporating mechanisms for graceful performance degradation without causing network-wide collapse. Exploring the integration of congestion control with fault-tolerant network architectures will be crucial for building next-generation, production-ready AI data centers.
 
 
-\subsection{Appendix}
+\section{Conclusion}
+\label{sec:conclusion}
 
-The content of the appendix is optional. If there is a need for appendix content, please use the following code to add it; If there is no such requirement, please comment out this section of code.
-
-\begin{lstlisting}
-\appendix
-\appendixpage
-\section{定理1的证明}
-\addappheadtotoc
-\end{lstlisting}
+This survey has systematically reviewed the landscape of congestion control schemes for RDMA networks, categorizing them by their fundamental mechanisms and the congestion signals they employ. Our analysis demonstrates a clear evolution from algorithms relying on indirect proxies like ECN and delay towards those utilizing direct network state via INT or switch-driven control, each navigating inherent trade-offs between performance, overhead, and deployability. As the demands on data centers intensify, particularly with the rise of specialized AI workloads, the pursuit of more adaptive, integrated, and workload-aware congestion control strategies becomes paramount. Ultimately, the development of robust and efficient congestion control remains a critical enabler for unlocking the full potential of RDMA in future data centers.
 
 
 \printbibliography[heading=bibintoc, title=\ebibname]
-
-\appendix
-\appendixpage
-\section{Proof of Theorem 1}
-\addappheadtotoc
-
 
 \end{document}
